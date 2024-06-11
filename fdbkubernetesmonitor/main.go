@@ -37,26 +37,18 @@ import (
 )
 
 var (
-	inputDir                string
-	fdbserverPath           string
-	versionFilePath         string
-	sharedBinaryDir         string
-	monitorConfFile         string
-	logPath                 string
-	executionModeString     string
-	outputDir               string
-	mainContainerVersion    string
-	currentContainerVersion string
-	additionalEnvFile       string
-	binaryOutputDirectory   string
-	listenAddress           string
-	copyPrimaryLibrary      string
-	requiredCopyFiles       []string
-	copyFiles               []string
-	copyBinaries            []string
-	copyLibraries           []string
-	processCount            int
-	enablePprof             bool
+	fdbserverPath        string
+	versionFilePath      string
+	sharedBinaryDir      string
+	monitorConfFile      string
+	logPath              string
+	executionModeString  string
+	outputDir            string
+	mainContainerVersion string
+	additionalEnvFile    string
+	listenAddress        string
+	processCount         int
+	enablePprof          bool
 )
 
 type executionMode string
@@ -118,14 +110,13 @@ func main() {
 		panic(err)
 	}
 	currentContainerVersion := strings.TrimSpace(string(versionBytes))
-
-	copyDetails, requiredCopies, err := getCopyDetails(inputDir, copyPrimaryLibrary, binaryOutputDirectory, copyFiles, copyBinaries, copyLibraries, requiredCopyFiles, currentContainerVersion)
+	mode := executionMode(executionModeString)
+	copyDetails, requiredCopies, err := getCopyDetails(inputDir, copyPrimaryLibrary, binaryOutputDirectory, copyFiles, copyBinaries, copyLibraries, requiredCopyFiles, currentContainerVersion, mode)
 	if err != nil {
 		logger.Error(err, "Error getting list of files to copy")
 		os.Exit(1)
 	}
 
-	mode := executionMode(executionModeString)
 	switch mode {
 	case executionModeLauncher:
 		customEnvironment, err := loadAdditionalEnvironment(logger)

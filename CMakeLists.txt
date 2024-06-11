@@ -121,7 +121,7 @@ file(WRITE ${CMAKE_BINARY_DIR}/version.txt ${FDB_VERSION})
 
 set(FDB_CURRENT_VERSION ${PROJECT_VERSION})
 set(FDB_FUTURE_VERSION "7.5.0")
-set(FDB_PREV_RELEASE_VERSION "7.3.3")
+set(FDB_PREV_RELEASE_VERSION "7.3.41")
 set(FDB_PREV2_RELEASE_VERSION "7.1.33")
 set(FDB_PREV3_RELEASE_VERSION "7.0.0")
 
@@ -242,7 +242,9 @@ if (CMAKE_EXPORT_COMPILE_COMMANDS AND WITH_PYTHON)
   add_custom_target(processed_compile_commands ALL DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json)
 
   # A prebuild target ensures that all actors, Swift-generated headers, and Swift modules are built.
-  add_custom_target(prebuild_for_ide ALL DEPENDS fdbserver_swift processed_compile_commands)
+  if (WITH_SWIFT)
+     add_custom_target(prebuild_for_ide ALL DEPENDS fdbserver_swift processed_compile_commands)
+  endif()
 endif()
 
 ################################################################################

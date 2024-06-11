@@ -132,6 +132,7 @@ public:
 	                                                          // than healthy priority
 	double RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
 	double RELOCATION_PARALLELISM_PER_DEST_SERVER;
+	double MERGE_RELOCATION_PARALLELISM_PER_TEAM;
 	int DD_QUEUE_MAX_KEY_SERVERS;
 	int DD_REBALANCE_PARALLELISM;
 	int DD_REBALANCE_RESET_AMOUNT;
@@ -196,6 +197,9 @@ public:
 	// Data fetching rate is throttled if its priority is STRICTLY LOWER than this value. The rate limit is set as
 	// STORAGE_FETCH_KEYS_RATE_LIMIT.
 	int FETCH_KEYS_THROTTLE_PRIORITY_THRESHOLD;
+
+	bool ENABLE_REPLICA_CONSISTENCY_CHECK_ON_DATA_MOVEMENT;
+	int CONSISTENCY_CHECK_REQUIRED_REPLICAS;
 
 	// Data distribution
 	// DD use AVAILABLE_SPACE_PIVOT_RATIO to calculate pivotAvailableSpaceRatio. Given an array that's descend
@@ -350,6 +354,8 @@ public:
 	double TR_REMOVE_SERVER_TEAM_DELAY; // wait for the specified time before try to remove next server team
 	double TR_REMOVE_SERVER_TEAM_EXTRA_DELAY; // serverTeamRemover waits for the delay and check DD healthyness again to
 	                                          // ensure it runs after machineTeamRemover
+	double TR_REDUNDANT_TEAM_PERCENTAGE_THRESHOLD; // serverTeamRemover will only remove teams if existing team number
+	                                               // is p% more than the desired team number.
 
 	// Remove wrong storage engines
 	double DD_REMOVE_STORE_ENGINE_DELAY; // wait for the specified time before remove the next batch
@@ -442,6 +448,8 @@ public:
 	bool ROCKSDB_BLOOM_WHOLE_KEY_FILTERING;
 	int ROCKSDB_MAX_AUTO_READAHEAD_SIZE;
 	int64_t ROCKSDB_BLOCK_CACHE_SIZE;
+	double ROCKSDB_CACHE_HIGH_PRI_POOL_RATIO;
+	bool ROCKSDB_CACHE_INDEX_AND_FILTER_BLOCKS;
 	double ROCKSDB_METRICS_DELAY;
 	double ROCKSDB_READ_VALUE_TIMEOUT;
 	double ROCKSDB_READ_VALUE_PREFIX_TIMEOUT;
@@ -537,6 +545,7 @@ public:
 	int ROCKSDB_WRITEBATCH_PROTECTION_BYTES_PER_KEY;
 	int ROCKSDB_MEMTABLE_PROTECTION_BYTES_PER_KEY;
 	int ROCKSDB_BLOCK_PROTECTION_BYTES_PER_KEY;
+	int SHARDED_ROCKSDB_MEMTABLE_MAX_RANGE_DELETIONS;
 	double SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO;
 	int SHARD_METADATA_SCAN_BYTES_LIMIT;
 	int ROCKSDB_MAX_MANIFEST_FILE_SIZE;
@@ -554,12 +563,16 @@ public:
 	int SHARDED_ROCKSDB_MAX_BACKGROUND_JOBS;
 	int64_t SHARDED_ROCKSDB_BLOCK_CACHE_SIZE;
 	int64_t SHARDED_ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC;
+	int64_t SHARDED_ROCKSDB_RATE_LIMITER_MODE;
 	int SHARDED_ROCKSDB_BACKGROUND_PARALLELISM;
 	int SHARDED_ROCKSDB_MAX_SUBCOMPACTIONS;
 	int SHARDED_ROCKSDB_LEVEL0_FILENUM_COMPACTION_TRIGGER;
 	int SHARDED_ROCKSDB_LEVEL0_SLOWDOWN_WRITES_TRIGGER;
 	int SHARDED_ROCKSDB_LEVEL0_STOP_WRITES_TRIGGER;
 	bool SHARDED_ROCKSDB_DELAY_COMPACTION_FOR_DATA_MOVE;
+	int SHARDED_ROCKSDB_MAX_OPEN_FILES;
+	bool SHARDED_ROCKSDB_READ_ASYNC_IO;
+	int SHARDED_ROCKSDB_PREFIX_LEN;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;

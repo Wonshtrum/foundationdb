@@ -121,32 +121,47 @@ void AccumulativeChecksumBuilder::newTag(Tag tag, UID ssid, Version commitVersio
 	}
 }
 
-void AccumulativeChecksumValidator::addMutation(const MutationRef& mutation, UID ssid, Tag tag, Version ssVersion) {
+void AccumulativeChecksumValidator::addMutation(const MutationRef& mutation,
+                                                UID ssid,
+                                                Tag tag,
+                                                Version ssVersion,
+                                                Version mutationVersion) {
 	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
 	ASSERT(mutation.checksum.present() && mutation.accumulativeChecksumIndex.present());
 	const uint16_t& acsIndex = mutation.accumulativeChecksumIndex.get();
-	Version atAcsVersion = 0;
 	if (!mutationBuffer.empty()) {
-		ASSERT(mutationBuffer[0].accumulativeChecksumIndex.present());
-		if (mutationBuffer[0].accumulativeChecksumIndex.get() != acsIndex) {
-			TraceEvent(SevError, "AcsValidatorMissingAcs", ssid)
+		ASSERT(mutationBuffer[0].second.accumulativeChecksumIndex.present());
+		if (mutationBuffer[0].first != mutationVersion) {
+			TraceEvent(SevError, "AcsValidatorCorruptionDetected", ssid)
+			    .detail("Reason", "Mutation version changed when AddMutation")
 			    .detail("AcsTag", tag)
 			    .detail("AcsIndex", acsIndex)
-			    .detail("MissingAcsIndex", mutationBuffer[0].accumulativeChecksumIndex.get())
+			    .detail("MissingVersion", mutationBuffer[0].first)
 			    .detail("Mutation", mutation.toString())
-			    .detail("LastAcsVersion", atAcsVersion)
-			    .detail("SSVersion", ssVersion);
+			    .detail("SSVersion", ssVersion)
+			    .detail("MutationVersion", mutationVersion);
+			throw please_reboot();
+		} else if (mutationBuffer[0].second.accumulativeChecksumIndex.get() != acsIndex) {
+			TraceEvent(SevError, "AcsValidatorCorruptionDetected", ssid)
+			    .detail("Reason", "Mutation ACSIndex changed when AddMutation")
+			    .detail("AcsTag", tag)
+			    .detail("AcsIndex", acsIndex)
+			    .detail("MissingAcsIndex", mutationBuffer[0].second.accumulativeChecksumIndex.get())
+			    .detail("Mutation", mutation.toString())
+			    .detail("SSVersion", ssVersion)
+			    .detail("MutationVersion", mutationVersion);
+			throw please_reboot();
 		}
 	}
-	mutationBuffer.push_back(mutationBuffer.arena(), mutation);
+	mutationBuffer.push_back(mutationBuffer.arena(), std::make_pair(mutationVersion, mutation));
 	totalAddedMutations++;
 	if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
 		TraceEvent(SevInfo, "AcsValidatorAddMutation", ssid)
 		    .detail("AcsTag", tag)
 		    .detail("AcsIndex", acsIndex)
 		    .detail("Mutation", mutation.toString())
-		    .detail("LastAcsVersion", atAcsVersion)
-		    .detail("SSVersion", ssVersion);
+		    .detail("SSVersion", ssVersion)
+		    .detail("MutationVersion", mutationVersion);
 	}
 }
 
@@ -156,53 +171,33 @@ Optional<AccumulativeChecksumState> AccumulativeChecksumValidator::processAccumu
     Tag tag,
     Version ssVersion) {
 	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
-	const LogEpoch& epoch = acsMutationState.epoch;
 	const uint16_t& acsIndex = acsMutationState.acsIndex;
 	auto it = acsTable.find(acsIndex);
+	bool existInTable = true;
 	if (it == acsTable.end()) {
-		// Unexpected. Since we assign acs mutation in commit batch
-		// So, there must be acs entry set up when adding the mutations of the batch
-		acsTable[acsIndex] = acsMutationState;
-		mutationBuffer.clear();
-		if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
-			TraceEvent(SevError, "AcsValidatorAcsMutationSkip", ssid)
-			    .detail("Reason", "No Entry")
-			    .detail("AcsTag", tag)
-			    .detail("AcsIndex", acsIndex)
-			    .detail("SSVersion", ssVersion)
-			    .detail("Epoch", epoch);
-		}
-		return acsMutationState;
+		existInTable = false;
+	} else if (acsMutationState.epoch > it->second.epoch) {
+		acsTable.erase(it); // Clear the old acs state if new epoch comes
+		existInTable = false;
 	}
-	if ((acsMutationState.version < it->second.version || acsMutationState.epoch < it->second.epoch)) {
-		mutationBuffer.clear();
-		if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
-			TraceEvent(SevError, "AcsValidatorAcsMutationSkip", ssid)
-			    .detail("Reason", "Acs Mutation Too Old")
-			    .detail("AcsTag", tag)
-			    .detail("AcsIndex", acsIndex)
-			    .detail("SSVersion", ssVersion)
-			    .detail("AcsMutation", acsMutationState.toString())
-			    .detail("Epoch", epoch);
-		}
-		return Optional<AccumulativeChecksumState>();
+	// Calculate acs value by mutation buffer and compare it with acs value in acs mutation
+	if (mutationBuffer.size() == 0) {
+		TraceEvent(SevError, "AcsValidatorCorruptionDetected", ssid)
+		    .detail("Reason", "Mutation buffer is empty when processAccumulativeChecksum")
+		    .detail("AcsTag", tag)
+		    .detail("AcsIndex", acsIndex)
+		    .detail("SSVersion", ssVersion);
+		throw please_reboot();
 	}
-	// Clear the old acs state if new epoch comes
-	bool cleared = false;
-	if (acsMutationState.epoch > it->second.epoch) {
-		acsTable.erase(it);
-		cleared = true;
-	}
-	// Apply mutations in cache to acs
-	ASSERT(mutationBuffer.size() >= 1);
-	uint32_t oldAcs = !cleared ? it->second.acs : initialAccumulativeChecksum;
-	Version oldVersion = !cleared ? it->second.version : 0;
+	uint32_t oldAcs = !existInTable ? initialAccumulativeChecksum : it->second.acs;
+	Version oldVersion = !existInTable ? 0 : it->second.version; // used for logging only, simply set it 0 if newEpoch
 	uint32_t newAcs = aggregateAcs(oldAcs, mutationBuffer);
 	checkedMutations = checkedMutations + mutationBuffer.size();
 	checkedVersions = checkedVersions + 1;
 	Version newVersion = acsMutationState.version;
 	if (newAcs != acsMutationState.acs) {
-		TraceEvent(SevError, "AcsValidatorAcsMutationMismatch", ssid)
+		TraceEvent(SevError, "AcsValidatorCorruptionDetected", ssid)
+		    .detail("Reason", "ACS value mismatch when processAccumulativeChecksum")
 		    .detail("AcsTag", tag)
 		    .detail("AcsIndex", acsIndex)
 		    .detail("SSVersion", ssVersion)
@@ -212,7 +207,19 @@ Optional<AccumulativeChecksumState> AccumulativeChecksumValidator::processAccumu
 		    .detail("ToVersion", newVersion)
 		    .detail("AcsToValidate", acsMutationState.acs)
 		    .detail("Epoch", acsMutationState.epoch)
-		    .detail("Cleared", cleared);
+		    .detail("ExistInTable", existInTable);
+		throw please_reboot();
+	} else if (newVersion != mutationBuffer.back().first) {
+		TraceEvent(SevError, "AcsValidatorCorruptionDetected", ssid)
+		    .detail(
+		        "Reason",
+		        "ACS mutation version is different from mutation version in buffer when processAccumulativeChecksum")
+		    .detail("AcsTag", tag)
+		    .detail("AcsIndex", acsIndex)
+		    .detail("LastMutationVersion", mutationBuffer.back().first)
+		    .detail("LastMutation", mutationBuffer.back().second.toString())
+		    .detail("SSVersion", ssVersion)
+		    .detail("AcsState", acsMutationState.toString());
 		throw please_reboot();
 	} else {
 		if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
@@ -225,10 +232,14 @@ Optional<AccumulativeChecksumState> AccumulativeChecksumValidator::processAccumu
 			    .detail("ToAcs", newAcs)
 			    .detail("ToVersion", newVersion)
 			    .detail("Epoch", acsMutationState.epoch)
-			    .detail("Cleared", cleared);
+			    .detail("ExistInTable", existInTable);
 		}
 	}
-	it->second = acsMutationState;
+	if (existInTable) {
+		it->second = acsMutationState;
+	} else {
+		acsTable[acsIndex] = acsMutationState;
+	}
 	mutationBuffer.clear();
 	return acsMutationState;
 }
@@ -239,6 +250,15 @@ void AccumulativeChecksumValidator::restore(const AccumulativeChecksumState& acs
                                             Version ssVersion) {
 	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
 	const uint16_t& acsIndex = acsState.acsIndex;
+	if (acsState.version > ssVersion) {
+		TraceEvent(SevError, "AcsValidatorCorruptionDetected", ssid)
+		    .detail("Reason", "Restored ACS version is larger than storage server version")
+		    .detail("AcsTag", tag)
+		    .detail("AcsIndex", acsIndex)
+		    .detail("SSVersion", ssVersion)
+		    .detail("AcsState", acsState.toString());
+		throw please_reboot();
+	}
 	acsTable[acsIndex] = acsState;
 	if (CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM_LOGGING) {
 		TraceEvent(SevInfo, "AcsValidatorRestore", ssid)
