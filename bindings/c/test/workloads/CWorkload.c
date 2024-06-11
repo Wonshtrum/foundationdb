@@ -18,17 +18,24 @@
  * limitations under the License.
  */
 
-#define FDB_USE_LATEST_API_VERSION
+// #define FDB_USE_LATEST_API_VERSION
 #include <stdlib.h>
-#include "foundationdb/fdb_c.h"
-#include "foundationdb/ClienWorkload.h"
+#include <stdio.h>
+// #include "foundationdb/fdb_c.h"
+#include "./CWorkload.h"
 
 typedef struct CWorkload {
+    char* name;
+    int cliend_id;
     BridgeToServer cpp;
     FDBWorkloadContext* context;
 } CWorkload;
 
-void workload_setup(CWorkload* workload, FDBDatabase* db, FDBPromise* done) {
+#define GET_CWORKLOAD(NAME, W) CWorkload* NAME = (CWorkload*)W
+
+static void workload_setup(FDBWorkload* raw_workload, FDBDatabase* db, FDBPromise* done) {
+    GET_CWORKLOAD(workload, raw_workload);
+    printf("workload_setup(%s_%d)\n", workload->name, workload->cliend_id);
     CStringPair pairs[2] = {
         {.key = "Layer", .val = "C"},
         {.key = "Stage", .val = "setup"},
@@ -38,7 +45,9 @@ void workload_setup(CWorkload* workload, FDBDatabase* db, FDBPromise* done) {
     workload->cpp.promise.send(done, true);
     workload->cpp.promise.free(done);
 }
-void workload_start(CWorkload* workload, FDBDatabase* db, FDBPromise* done) {
+static void workload_start(FDBWorkload* raw_workload, FDBDatabase* db, FDBPromise* done) {
+    GET_CWORKLOAD(workload, raw_workload);
+    printf("workload_start(%s_%d)\n", workload->name, workload->cliend_id);
     CStringPair pairs[2] = {
         {.key = "Layer", .val = "C"},
         {.key = "Stage", .val = "start"},
@@ -48,7 +57,9 @@ void workload_start(CWorkload* workload, FDBDatabase* db, FDBPromise* done) {
     workload->cpp.promise.send(done, true);
     workload->cpp.promise.free(done);
 }
-void workload_check(CWorkload* workload, FDBDatabase* db, FDBPromise* done) {
+static void workload_check(FDBWorkload* raw_workload, FDBDatabase* db, FDBPromise* done) {
+    GET_CWORKLOAD(workload, raw_workload);
+    printf("workload_setup(%s_%d)\n", workload->name, workload->cliend_id);
     CStringPair pairs[2] = {
         {.key = "Layer", .val = "C"},
         {.key = "Stage", .val = "check"},
@@ -58,29 +69,45 @@ void workload_check(CWorkload* workload, FDBDatabase* db, FDBPromise* done) {
     workload->cpp.promise.send(done, true);
     workload->cpp.promise.free(done);
 }
-CVector workload_getMetrics(CWorkload* workload) {
+static CVector workload_getMetrics(FDBWorkload* raw_workload) {
+    GET_CWORKLOAD(workload, raw_workload);
+    printf("workload_getMetrics(%s_%d)\n", workload->name, workload->cliend_id);
     CVector metrics = { 0 };
     return metrics;
 }
-double workload_getCheckTimeout(CWorkload* workload) {
+static double workload_getCheckTimeout(FDBWorkload* raw_workload) {
+    GET_CWORKLOAD(workload, raw_workload);
+    printf("workload_getCheckTimeout(%s_%d)\n", workload->name, workload->cliend_id);
     return 3000.;
 };
-void workload_free(CWorkload* workload) {
+static void workload_free(FDBWorkload* raw_workload) {
+    GET_CWORKLOAD(workload, raw_workload);
+    printf("workload_free(%s_%d)\n", workload->name, workload->cliend_id);
+    free(workload->name);
     free(workload);
 }
 
-BridgeToClient workloadInstantiate(const char* name, FDBWorkloadContext* context, BridgeToServer bridgeToServer) {
-    int status = fdb_select_api_version(FDB_API_VERSION);
+extern BridgeToClient workloadInstantiate(char* name, FDBWorkloadContext* context, BridgeToServer bridgeToServer) {
+    // int status = fdb_select_api_version(FDB_API_VERSION);
     // if (status != 0) {
     //     fdb_get_error(status);
     // }
 
+    char* my_c_option = bridgeToServer.context.getOption(context, "my_c_option", "null");
+    int client_id = bridgeToServer.context.clientId(context);
+    int client_count = bridgeToServer.context.clientCount(context);
+
+    printf("workloadInstantiate(%s, %p)[%d/%d]\n", name, context, client_id, client_count);
+    printf("my_c_option: %s\n", my_c_option);
+
     CWorkload* workload = (CWorkload*)malloc(sizeof(CWorkload));
+    workload->name = name;
+    workload->cliend_id = client_id;
     workload->cpp = bridgeToServer;
     workload->context = context;
 
     BridgeToClient bridgeToClient = {
-        .workload = workload,
+        .workload = (FDBWorkload*)workload,
         .setup = workload_setup,
         .start = workload_start,
         .check = workload_check,

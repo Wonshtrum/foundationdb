@@ -100,34 +100,45 @@ struct FDBLoggerImpl : FDBLogger {
 	}
 };
 
+namespace capi {
+	#include "foundationdb/CWorkload.h"
+}
 namespace translator {
+
 	template<typename T>
 	struct Wrapper {
 		T inner;
 	};
 
 	namespace context {
-		void trace(FDBWorkloadContext* context, FDBSeverity severity, const char* name, CVector vec) {
+		void trace(capi::FDBWorkloadContext* c_context, capi::FDBSeverity c_severity, const char* name, capi::CVector vec) {
+			auto context = (FDBWorkloadContext*)c_context;
+			auto severity = (FDBSeverity)c_severity;
 			std::vector<std::pair<std::string, std::string>> details;
-			CStringPair* pairs = (CStringPair*)vec.elements;
+			auto pairs = (capi::CStringPair*)vec.elements;
 			for (int i = 0 ; i < vec.n ; i++) {
-				details.push_back(std::pair<std::string, std::string>(pairs[i].key, pairs[i].value));
+				details.push_back(std::pair<std::string, std::string>(pairs[i].key, pairs[i].val));
 			}
 			return context->trace(severity, name, details);
 		}
-		uint64_t getProcessID(FDBWorkloadContext* context) {
+		uint64_t getProcessID(capi::FDBWorkloadContext* c_context) {
+			auto context = (FDBWorkloadContext*)c_context;
 			return context->getProcessID();
 		}
-		void setProcessID(FDBWorkloadContext* context, uint64_t processID) {
+		void setProcessID(capi::FDBWorkloadContext* c_context, uint64_t processID) {
+			auto context = (FDBWorkloadContext*)c_context;
 			return context->setProcessID(processID);
 		}
-		double now(FDBWorkloadContext* context) {
+		double now(capi::FDBWorkloadContext* c_context) {
+			auto context = (FDBWorkloadContext*)c_context;
 			return context->now();
 		}
-		uint32_t rnd(FDBWorkloadContext* context) {
+		uint32_t rnd(capi::FDBWorkloadContext* c_context) {
+			auto context = (FDBWorkloadContext*)c_context;
 			return context->rnd();
 		}
-		char* getOption(FDBWorkloadContext* context, const char* name, const char* defaultValue) {
+		char* getOption(capi::FDBWorkloadContext* c_context, const char* name, const char* defaultValue) {
+			auto context = (FDBWorkloadContext*)c_context;
 			std::string str = context->getOption(name, std::string(defaultValue));
 			size_t len = str.length();
 			char* c_str = (char*)malloc(len + 1);
@@ -135,32 +146,37 @@ namespace translator {
 			c_str[len] = '\0';
 			return c_str;
 		}
-		int clientId(FDBWorkloadContext* context) {
+		int clientId(capi::FDBWorkloadContext* c_context) {
+			auto context = (FDBWorkloadContext*)c_context;
 			return context->clientId();
 		}
-		int clientCount(FDBWorkloadContext* context) {
+		int clientCount(capi::FDBWorkloadContext* c_context) {
+			auto context = (FDBWorkloadContext*)c_context;
 			return context->clientCount();
 		}
-		int64_t sharedRandomNumber(FDBWorkloadContext* context) {
+		int64_t sharedRandomNumber(capi::FDBWorkloadContext* c_context) {
+			auto context = (FDBWorkloadContext*)c_context;
 			return context->sharedRandomNumber();
 		}
 	}
 
 	namespace promise {
-		void send(Wrapper<GenericPromise<bool>>* promise, bool value) {
+		void send(capi::FDBPromise* c_promise, bool value) {
+			auto promise = (Wrapper<GenericPromise<bool>>*)c_promise;
 			promise->inner.send(value);
 		}
-		void free(Wrapper<GenericPromise<bool>>* promise) {
+		void free(capi::FDBPromise* c_promise) {
+			auto promise = (Wrapper<GenericPromise<bool>>*)c_promise;
 			delete promise;
 		}
 	}
 
 	class Workload: public FDBWorkload {
 	private:
-		BridgeToClient c;
+		capi::BridgeToClient c;
 
 	public:
-		Workload(BridgeToClient bridgeToClient): c(bridgeToClient) {}
+		Workload(capi::BridgeToClient bridgeToClient): c(bridgeToClient) {}
 		~Workload() {
 			this->c.free(this->c.workload);
 		}
@@ -169,22 +185,22 @@ namespace translator {
 			return true;
 		}
 		virtual void setup(FDBDatabase* db, GenericPromise<bool> done) override {
-			auto wrapped = new Wrapper<GenericPromise<bool>> { done };
+			auto wrapped = (capi::FDBPromise*)new Wrapper<GenericPromise<bool>> { done };
 			return this->c.setup(this->c.workload, db, wrapped);
 		}
 		virtual void start(FDBDatabase* db, GenericPromise<bool> done) override {
-			auto wrapped = new Wrapper<GenericPromise<bool>> { done };
+			auto wrapped = (capi::FDBPromise*)new Wrapper<GenericPromise<bool>> { done };
 			return this->c.start(this->c.workload, db, wrapped);
 		}
 		virtual void check(FDBDatabase* db, GenericPromise<bool> done) override {
-			auto wrapped = new Wrapper<GenericPromise<bool>> { done };
+			auto wrapped = (capi::FDBPromise*)new Wrapper<GenericPromise<bool>> { done };
 			return this->c.check(this->c.workload, db, wrapped);
 		}
 		virtual void getMetrics(std::vector<FDBPerfMetric>& out) const override {
-			CVector vec = this->c.getMetrics(this->c.workload);
-			CMetric* metrics = (CMetric*)vec.elements;
+			auto vec = this->c.getMetrics(this->c.workload);
+			auto metrics = (capi::CMetric*)vec.elements;
 			for (int i = 0 ; i < vec.n ; i++) {
-				out->emplace_back(FDBPerfMetric {
+				out.emplace_back(FDBPerfMetric {
 					std::string(metrics[i].name),
 					metrics[i].value,
 					metrics[i].averaged,
@@ -202,7 +218,6 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 	std::string libraryName, libraryPath;
 	bool success = true;
 	void* library = nullptr;
-	FDBWorkloadFactory* (*workloadFactory)(FDBLogger*);
 	std::shared_ptr<FDBWorkload> workloadImpl;
 
 	constexpr static auto NAME = "External";
@@ -231,6 +246,7 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 		libraryPath = ::getOption(options, "libraryPath"_sr, Value(getDefaultLibraryPath())).toString();
 		auto wName = ::getOption(options, "workloadName"_sr, ""_sr);
 		auto fullPath = joinPath(libraryPath, toLibName(libraryName));
+		std::cout << "ExternalWorkload::useCAPI: " << useCAPI << "\n";
 		TraceEvent("ExternalWorkloadLoad")
 		    .detail("LibraryName", libraryName)
 		    .detail("LibraryPath", fullPath)
@@ -243,14 +259,14 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 		}
 
 		if (useCAPI) {
-			BridgeToClient (*workloadInstantiate)(const char*, FDBWorkloadContext*, BridgeToServer);
+			capi::BridgeToClient (*workloadInstantiate)(char*, FDBWorkloadContext*, capi::BridgeToServer);
 			workloadInstantiate = reinterpret_cast<decltype(workloadInstantiate)>(loadFunction(library, "workloadInstantiate"));
-			if (workloadFactory == nullptr) {
-				TraceEvent(SevError, "ExternalFactoryNotFound").log();
+			if (workloadInstantiate == nullptr) {
+				TraceEvent(SevError, "ExternalInstantiateNotFound").log();
 				success = false;
 				return;
 			}
-			BridgeToServer bridgeToServer = {
+			capi::BridgeToServer bridgeToServer = {
 				.context = {
 					.trace = translator::context::trace,
 					.getProcessID = translator::context::getProcessID,
@@ -267,14 +283,20 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 					.free = translator::promise::free,
 				},
 			};
-			BridgeToClient bridgeToClient = (*workloadInstantiate)(wName.toString().c_str(), this, bridgeToServer);
-			if (!bridgeToClient) {
-				TraceEvent(SevError, "WorkloadNotFound").log();
-				success = false;
-				return;
-			}
+			auto name = wName.toString();
+			size_t len = name.length();
+			char* c_str = (char*)malloc(len + 1);
+			memcpy(c_str, name.c_str(), len);
+			c_str[len] = '\0';
+			capi::BridgeToClient bridgeToClient = (*workloadInstantiate)(c_str, this, bridgeToServer);
+			// if (!bridgeToClient) {
+			// 	TraceEvent(SevError, "WorkloadNotFound").log();
+			// 	success = false;
+			// 	return;
+			// }
 			workloadImpl = std::make_shared<translator::Workload>(bridgeToClient);
 		} else {
+			FDBWorkloadFactory* (*workloadFactory)(FDBLogger*);
 			workloadFactory = reinterpret_cast<decltype(workloadFactory)>(loadFunction(library, "workloadFactory"));
 			if (workloadFactory == nullptr) {
 				TraceEvent(SevError, "ExternalFactoryNotFound").log();
